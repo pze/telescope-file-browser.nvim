@@ -48,13 +48,17 @@ local function fd_file_args(opts)
       table.insert(args, "file")
     end
     if type(opts.depth) == "number" then
-      table.insert(args, "--maxdepth")
+      table.insert(args, "--max-depth")
       table.insert(args, opts.depth)
     end
   else
     args = { "-t", "d", "-a" }
   end
 
+  if type(opts.max_results) == "number" then
+      table.insert(args, "--max-results")
+      table.insert(args, opts.max_results)
+  end
   if hidden_opts(opts) then
     table.insert(args, "-H")
   end

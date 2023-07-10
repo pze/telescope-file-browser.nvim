@@ -102,6 +102,7 @@ require("telescope").setup {
       files = true,
       add_dirs = true,
       depth = 1,
+      -- max_results = 100,
       auto_depth = false,
       select_buffer = false,
       hidden = { file_browser = false, folder_browser = false },
