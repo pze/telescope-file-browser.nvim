@@ -47,17 +47,18 @@ local function fd_file_args(opts)
       table.insert(args, "--type")
       table.insert(args, "file")
     end
-    if type(opts.depth) == "number" then
-      table.insert(args, "--max-depth")
-      table.insert(args, opts.depth)
-    end
   else
     args = { "-t", "d", "-a" }
   end
 
+  if type(opts.depth) == "number" then
+    table.insert(args, "--max-depth")
+    table.insert(args, opts.depth)
+  end
+
   if type(opts.max_results) == "number" then
-      table.insert(args, "--max-results")
-      table.insert(args, opts.max_results)
+    table.insert(args, "--max-results")
+    table.insert(args, opts.max_results)
   end
   if hidden_opts(opts) then
     table.insert(args, "-H")
@@ -190,14 +191,14 @@ fb_finders.finder = function(opts)
   return setmetatable({
     cwd_to_path = opts.cwd_to_path,
     cwd = opts.cwd_to_path and opts.path or opts.cwd, -- nvim cwd
-    path = vim.F.if_nil(opts.path, opts.cwd), -- current path for file browser
+    path = vim.F.if_nil(opts.path, opts.cwd),         -- current path for file browser
     add_dirs = vim.F.if_nil(opts.add_dirs, true),
     hidden = hidden,
-    depth = vim.F.if_nil(opts.depth, 1), -- depth for file browser
+    depth = vim.F.if_nil(opts.depth, 1),               -- depth for file browser
     max_results = opts.max_results,
     auto_depth = vim.F.if_nil(opts.auto_depth, false), -- depth for file browser
     respect_gitignore = vim.F.if_nil(opts.respect_gitignore, has_fd),
-    files = vim.F.if_nil(opts.files, true), -- file or folders mode
+    files = vim.F.if_nil(opts.files, true),            -- file or folders mode
     grouped = vim.F.if_nil(opts.grouped, false),
     quiet = vim.F.if_nil(opts.quiet, false),
     select_buffer = vim.F.if_nil(opts.select_buffer, false),
