@@ -49,15 +49,18 @@ local function fd_file_args(opts)
       table.insert(args, "file")
     end
 
-    depth = vim.F.if_nil(depth, 1)
+    if type(depth) == "number" then
+      table.insert(args, "--max-depth")
+      table.insert(args, depth)
+    end
   else
     args = { "-t", "d", "-a" }
+    if type(depth) == "number" and depth > 1 then
+      table.insert(args, "--max-depth")
+      table.insert(args, depth)
+    end
   end
 
-  if type(depth) == "number" then
-    table.insert(args, "--max-depth")
-    table.insert(args, depth)
-  end
   if type(opts.max_results) == "number" then
     table.insert(args, "--max-results")
     table.insert(args, opts.max_results)
@@ -197,7 +200,7 @@ fb_finders.finder = function(opts)
     path = vim.F.if_nil(opts.path, opts.cwd), -- current path for file browser
     add_dirs = vim.F.if_nil(opts.add_dirs, true),
     hidden = hidden,
-    depth = opts.depth, -- depth for file browser
+    depth = vim.F.if_nil(opts.depth), -- depth for file browser
     max_results = opts.max_results,
     auto_depth = vim.F.if_nil(opts.auto_depth, false), -- depth for file browser
     respect_gitignore = vim.F.if_nil(opts.respect_gitignore, has_fd),
