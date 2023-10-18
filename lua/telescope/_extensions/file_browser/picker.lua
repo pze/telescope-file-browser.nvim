@@ -30,7 +30,9 @@ local fb_picker = {}
 --- List, create, delete, rename, or move files and folders of your cwd.<br>
 --- Notes
 --- - Default keymaps in insert/normal mode:
----   - `<cr>`: opens the currently selected file, or navigates to the currently selected directory
+---   - `<cr>`   : Opens the currently selected file/directory, or creates whatever is in the prompt
+---   - `<s-cr>` : Create path in prompt
+---   - `/`, `\` : (OS Path separator) When typing filepath, the path separator will open a directory like `<cr>`.
 ---   - `<A-c>/c`: Create file/folder at current `path` (trailing path separator creates folder)
 ---   - `<A-r>/r`: Rename multi-selected files/folders
 ---   - `<A-m>/m`: Move multi-selected files/folders to current `path`
@@ -64,11 +66,13 @@ local fb_picker = {}
 ---@field select_buffer boolean: select current buffer if possible; may imply `hidden=true` (default: false)
 ---@field hidden table|boolean: determines whether to show hidden files or not (default: `{ file_browser = false, folder_browser = false }`)
 ---@field respect_gitignore boolean: induces slow-down w/ plenary finder (default: false, true if `fd` available)
+---@field follow_symlinks boolean: traverse symbolic links, i.e. files and folders (default: false, only works with `fd`)
 ---@field browse_files function: custom override for the file browser (default: |fb_finders.browse_files|)
 ---@field browse_folders function: custom override for the folder browser (default: |fb_finders.browse_folders|)
 ---@field hide_parent_dir boolean: hide `../` in the file browser (default: false)
 ---@field collapse_dirs boolean: skip dirs w/ only single (possibly hidden) sub-dir in file_browser (default: false)
 ---@field quiet boolean: surpress any notification from file_brower actions (default: false)
+---@field use_ui_input boolean: Use vim.ui.input() instead of vim.fn.input() or vim.fn.confirm() (default: true)
 ---@field dir_icon string: change the icon for a directory (default: )
 ---@field dir_icon_hl string: change the highlight group of dir icon (default: "Default")
 ---@field display_stat boolean|table: ordered stat; see above notes, (default: `{ date = true, size = true, mode = true }`)

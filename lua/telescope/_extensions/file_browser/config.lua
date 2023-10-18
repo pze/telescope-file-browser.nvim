@@ -1,6 +1,4 @@
 local fb_actions = require "telescope._extensions.file_browser.actions"
-local fb_utils = require "telescope._extensions.file_browser.utils"
-local scan = require "plenary.scandir"
 local Path = require "plenary.path"
 
 local action_state = require "telescope.actions.state"
@@ -9,6 +7,7 @@ local action_set = require "telescope.actions.set"
 local config = {}
 
 _TelescopeFileBrowserConfig = {
+  use_ui_input = true,
   quiet = false,
   mappings = {
     ["i"] = {
@@ -27,6 +26,7 @@ _TelescopeFileBrowserConfig = {
       ["<C-h>"] = fb_actions.toggle_hidden,
       ["<C-s>"] = fb_actions.toggle_all,
       ["<bs>"] = fb_actions.backspace,
+      [Path.path.sep] = fb_actions.path_separator,
     },
     ["n"] = {
       ["c"] = fb_actions.create,
@@ -44,47 +44,24 @@ _TelescopeFileBrowserConfig = {
       ["s"] = fb_actions.toggle_all,
     },
   },
-  attach_mappings = function(prompt_bufnr, _)
-    action_set.select:replace_if(function()
-      -- test whether selected entry is directory
+  attach_mappings = function()
+    local entry_is_dir = function()
       local entry = action_state.get_selected_entry()
       return entry and entry.Path:is_dir()
-    end, function()
-      local current_picker = action_state.get_current_picker(prompt_bufnr)
-      local finder = current_picker.finder
+    end
+
+    local entry_is_nil = function(prompt_bufnr)
+      local prompt = action_state.get_current_picker(prompt_bufnr):_get_prompt()
       local entry = action_state.get_selected_entry()
 
-      if not vim.loop.fs_access(entry.path, "X") then
-        fb_utils.notify("select", { level = "WARN", msg = "Permission denied" })
-        return
-      end
+      return entry == nil and #prompt > 0
+    end
 
-      local path = vim.loop.fs_realpath(entry.path)
+    action_set.select:replace_map {
+      [entry_is_dir] = fb_actions.open_dir,
+      [entry_is_nil] = fb_actions.create_from_prompt,
+    }
 
-      if finder.files and finder.collapse_dirs then
-        local upwards = path == Path:new(finder.path):parent():absolute()
-        while true do
-          local dirs = scan.scan_dir(path, { add_dirs = true, depth = 1, hidden = true })
-          if #dirs == 1 and vim.fn.isdirectory(dirs[1]) then
-            path = upwards and Path:new(path):parent():absolute() or dirs[1]
-            -- make sure it's upper bound (#dirs == 1 implicitly reflects lower bound)
-            if path == Path:new(path):parent():absolute() then
-              break
-            end
-          else
-            break
-          end
-        end
-      end
-
-      finder.files = true
-      finder.path = path
-      fb_utils.redraw_border_title(current_picker)
-      current_picker:refresh(
-        finder,
-        { new_prefix = fb_utils.relative_path_prefix(finder), reset_prompt = true, multi = current_picker._multi }
-      )
-    end)
     return true
   end,
 } or _TelescopeFileBrowserConfig

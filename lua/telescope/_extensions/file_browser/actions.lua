@@ -40,6 +40,8 @@ local transform_mod = require("telescope.actions.mt").transform_mod
 
 local Path = require "plenary.path"
 local popup = require "plenary.popup"
+local scan = require "plenary.scandir"
+local async = require "plenary.async"
 
 local fb_actions = setmetatable({}, {
   __index = function(_, k)
@@ -105,6 +107,31 @@ local function newly_created_root(path, cwd)
   return idx == 1 and path:absolute() or parents[idx - 1]
 end
 
+local function get_input(opts, callback)
+  local fb_config = require "telescope._extensions.file_browser.config"
+  if fb_config.values.use_ui_input then
+    vim.ui.input(opts, callback)
+  else
+    async.run(function()
+      return vim.fn.input(opts)
+    end, callback)
+  end
+end
+
+local function get_confirmation(opts, callback)
+  local fb_config = require "telescope._extensions.file_browser.config"
+  if fb_config.values.use_ui_input then
+    opts.prompt = opts.prompt .. " [y/N]"
+    vim.ui.input(opts, function(input)
+      callback(input and input:lower() == "y")
+    end)
+  else
+    async.run(function()
+      return vim.fn.confirm(opts.prompt, table.concat({ "&Yes", "&No" }, "\n"), 2) == 1
+    end, callback)
+  end
+end
+
 --- Creates a new file or dir in the current directory of the |telescope-file-browser.picker.file_browser|.
 --- - Finder:
 ---   - file_browser: create a file in the currently opened directory
@@ -118,7 +145,7 @@ fb_actions.create = function(prompt_bufnr)
   local finder = current_picker.finder
 
   local base_dir = get_target_dir(finder) .. os_sep
-  vim.ui.input({ prompt = "Insert the file name: ", default = base_dir, completion = "file" }, function(input)
+  get_input({ prompt = "Create: ", default = base_dir, completion = "file" }, function(input)
     vim.cmd [[ redraw ]] -- redraw to clear out vim.ui.prompt to avoid hit-enter prompt
     local file = create(input, finder)
     if file then
@@ -249,7 +276,7 @@ fb_actions.rename = function(prompt_bufnr)
       fb_utils.notify("action.rename", { msg = "Please select a valid file or folder!", level = "WARN", quiet = quiet })
       return
     end
-    vim.ui.input({ prompt = "Insert a new name: ", default = old_path:absolute(), completion = "file" }, function(file)
+    get_input({ prompt = "Rename: ", default = old_path:absolute(), completion = "file" }, function(file)
       vim.cmd [[ redraw ]] -- redraw to clear out vim.ui.prompt to avoid hit-enter prompt
       if file == "" or file == nil then
         fb_utils.notify("action.rename", { msg = "Renaming aborted!", level = "WARN", quiet = quiet })
@@ -408,7 +435,7 @@ fb_actions.copy = function(prompt_bufnr)
 
     if exists then
       exists = false
-      vim.ui.input({
+      get_input({
         prompt = string.format(
           "Please enter a new name, <CR> to overwrite (merge), or <ESC> to skip file (folder):\n",
           name
@@ -480,9 +507,9 @@ fb_actions.remove = function(prompt_bufnr)
   local message = "Selections to be deleted: " .. table.concat(files, ", ")
   fb_utils.notify("actions.remove", { msg = message, level = "INFO", quiet = quiet })
   -- TODO fix default vim.ui.input and nvim-notify 'selections to be deleted' message
-  vim.ui.input({ prompt = "Remove selections [y/N]: " }, function(input)
+  get_confirmation({ prompt = "Remove selection? (" .. #files .. " items)" }, function(confirmed)
     vim.cmd [[ redraw ]] -- redraw to clear out vim.ui.prompt to avoid hit-enter prompt
-    if input and input:lower() == "y" then
+    if confirmed then
       for _, p in ipairs(selections) do
         local is_dir = p:is_dir()
         p:rm { recursive = is_dir }
@@ -519,6 +546,18 @@ fb_actions.toggle_hidden = function(prompt_bufnr)
     else
       finder.hidden.folder_browser = not finder.hidden.folder_browser
     end
+  end
+  current_picker:refresh(finder, { reset_prompt = true, multi = current_picker._multi })
+end
+
+--- Toggle respect_gitignore for |telescope-file-browser.picker.file_browser|.
+---@param prompt_bufnr number: The prompt bufnr
+fb_actions.toggle_respect_gitignore = function(prompt_bufnr)
+  local current_picker = action_state.get_current_picker(prompt_bufnr)
+  local finder = current_picker.finder
+
+  if type(finder.respect_gitignore) == "boolean" then
+    finder.respect_gitignore = not finder.respect_gitignore
   end
   current_picker:refresh(finder, { reset_prompt = true, multi = current_picker._multi })
 end
@@ -766,6 +805,54 @@ fb_actions.backspace = function(prompt_bufnr, bypass)
   else
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<bs>", true, false, true), "tn", false)
   end
+end
+
+fb_actions.path_separator = function(prompt_bufnr)
+  local current_picker = action_state.get_current_picker(prompt_bufnr)
+  local dir = Path:new(current_picker.finder.path .. os_sep .. current_picker:_get_prompt() .. os_sep)
+
+  if dir:exists() and dir:is_dir() then
+    fb_actions.open_dir(prompt_bufnr, dir.filename)
+  else
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(os_sep, true, false, true), "tn", false)
+  end
+end
+
+fb_actions.open_dir = function(prompt_bufnr, dir)
+  local current_picker = action_state.get_current_picker(prompt_bufnr)
+  local finder = current_picker.finder
+  local entry = action_state.get_selected_entry()
+
+  if not vim.loop.fs_access(entry.path, "X") then
+    fb_utils.notify("select", { level = "WARN", msg = "Permission denied" })
+    return
+  end
+
+  local path = vim.loop.fs_realpath(dir:match("^" .. os_sep) and dir or entry.path)
+
+  if finder.files and finder.collapse_dirs then
+    local upwards = path == Path:new(finder.path):parent():absolute()
+    while true do
+      local dirs = scan.scan_dir(path, { add_dirs = true, depth = 1, hidden = true })
+      if #dirs == 1 and vim.fn.isdirectory(dirs[1]) then
+        path = upwards and Path:new(path):parent():absolute() or dirs[1]
+        -- make sure it's upper bound (#dirs == 1 implicitly reflects lower bound)
+        if path == Path:new(path):parent():absolute() then
+          break
+        end
+      else
+        break
+      end
+    end
+  end
+
+  finder.files = true
+  finder.path = path
+  fb_utils.redraw_border_title(current_picker)
+  current_picker:refresh(
+    finder,
+    { new_prefix = fb_utils.relative_path_prefix(finder), reset_prompt = true, multi = current_picker._multi }
+  )
 end
 
 fb_actions = transform_mod(fb_actions)

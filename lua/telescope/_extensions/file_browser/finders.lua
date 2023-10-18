@@ -40,13 +40,14 @@ local function fd_file_args(opts)
   local depth = opts.depth
   if opts.files then
     args = {
-      "--base-directory=" .. opts.path,
       "--absolute-path",
       "--path-separator=" .. os_sep,
+      "--type",
+      "file",
     }
-    if opts.add_dirs == false then
+    if opts.add_dirs then
       table.insert(args, "--type")
-      table.insert(args, "file")
+      table.insert(args, "directory")
     end
 
     if type(depth) == "number" then
@@ -54,7 +55,7 @@ local function fd_file_args(opts)
       table.insert(args, depth)
     end
   else
-    args = { "-t", "d", "-a" }
+    args = { "--type", "directory", "--absolute-path" }
     if type(depth) == "number" and depth > 1 then
       table.insert(args, "--max-depth")
       table.insert(args, depth)
@@ -67,10 +68,13 @@ local function fd_file_args(opts)
   end
 
   if hidden_opts(opts) then
-    table.insert(args, "-H")
+    table.insert(args, "--hidden")
   end
-  if opts.respect_gitignore == false then
+  if not opts.respect_gitignore then
     table.insert(args, "--no-ignore-vcs")
+  end
+  if opts.follow_symlinks then
+    table.insert(args, "--follow")
   end
   return args
 end
@@ -100,14 +104,14 @@ fb_finders.browse_files = function(opts)
       local entry_maker = opts.entry_maker { cwd = opts.path, git_file_status = {} }
       return async_oneshot_finder {
         fn_command = function()
-          return { command = "fd", args = fd_file_args(opts) }
+          return { command = "fd", args = fd_file_args(opts), cwd = opts.path }
         end,
         entry_maker = entry_maker,
         results = not opts.hide_parent_dir and { entry_maker(parent_path) } or {},
         cwd = opts.path,
       }
     else
-      data, _ = Job:new({ command = "fd", args = fd_file_args(opts) }):sync()
+      data = fb_utils.job("fd", fd_file_args(opts), opts.path)
     end
   else
     data = scan.scan_dir(opts.path, {
@@ -120,8 +124,8 @@ fb_finders.browse_files = function(opts)
 
   local git_file_status = {}
   if opts.git_status then
-    local git_status, _ = Job:new({ cwd = opts.path, command = "git", args = git_args() }):sync()
-    git_file_status = fb_git.parse_status_output(git_status, opts.cwd)
+    local git_status = Job:new({ cwd = opts.path, command = "git", args = git_args() }):sync()
+    git_file_status = fb_git.parse_status_output(git_status, opts.git_root)
   end
   if opts.path ~= os_sep and not opts.hide_parent_dir then
     table.insert(data, 1, parent_path)
@@ -177,6 +181,7 @@ end
 ---@field depth number: file tree depth to display (default: 1)
 ---@field hidden table|boolean: determines whether to show hidden files or not (default: `{ file_browser = false, folder_browser = false }`)
 ---@field respect_gitignore boolean: induces slow-down w/ plenary finder (default: false, true if `fd` available)
+---@field follow_symlinks boolean: traverse symbolic links, i.e. files and folders (default: false, only works with `fd`)
 ---@field hide_parent_dir boolean: hide `../` in the file browser (default: false)
 ---@field dir_icon string: change the icon for a directory (default: )
 ---@field dir_icon_hl string: change the highlight group of dir icon (default: "Default")
@@ -194,6 +199,8 @@ fb_finders.finder = function(opts)
     hidden = vim.tbl_extend("keep", hidden, hidden_default)
   end
 
+  local git_root = Job:new({ command = "git", args = { "rev-parse", "--show-toplevel" } }):sync()[1]
+
   return setmetatable({
     cwd_to_path = opts.cwd_to_path,
     cwd = opts.cwd_to_path and opts.path or opts.cwd, -- nvim cwd
@@ -204,13 +211,15 @@ fb_finders.finder = function(opts)
     max_results = opts.max_results,
     auto_depth = vim.F.if_nil(opts.auto_depth, false), -- depth for file browser
     respect_gitignore = vim.F.if_nil(opts.respect_gitignore, has_fd),
+    follow_symlinks = vim.F.if_nil(opts.follow_symlinks, false),
     files = vim.F.if_nil(opts.files, true), -- file or folders mode
     grouped = vim.F.if_nil(opts.grouped, false),
     quiet = vim.F.if_nil(opts.quiet, false),
     select_buffer = vim.F.if_nil(opts.select_buffer, false),
     hide_parent_dir = vim.F.if_nil(opts.hide_parent_dir, false),
     collapse_dirs = vim.F.if_nil(opts.collapse_dirs, false),
-    git_status = vim.F.if_nil(opts.git_status, true),
+    git_status = vim.F.if_nil(opts.git_status, git_root ~= nil),
+    git_root = git_root,
     -- ensure we forward make_entry opts adequately
     entry_maker = vim.F.if_nil(opts.entry_maker, function(local_opts)
       return fb_make_entry(vim.tbl_extend("force", opts, local_opts))
