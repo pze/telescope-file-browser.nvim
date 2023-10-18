@@ -37,6 +37,7 @@ end
 
 local function fd_file_args(opts)
   local args
+  local depth = opts.depth
   if opts.files then
     args = {
       "--absolute-path",
@@ -48,12 +49,22 @@ local function fd_file_args(opts)
       table.insert(args, "--type")
       table.insert(args, "directory")
     end
-    if type(opts.depth) == "number" then
-      table.insert(args, "--maxdepth")
-      table.insert(args, opts.depth)
+
+    if type(depth) == "number" then
+      table.insert(args, "--max-depth")
+      table.insert(args, depth)
     end
   else
     args = { "--type", "directory", "--absolute-path" }
+    if type(depth) == "number" and depth > 1 then
+      table.insert(args, "--max-depth")
+      table.insert(args, depth)
+    end
+  end
+
+  if type(opts.max_results) == "number" then
+    table.insert(args, "--max-results")
+    table.insert(args, opts.max_results)
   end
 
   if hidden_opts(opts) then
@@ -196,7 +207,8 @@ fb_finders.finder = function(opts)
     path = vim.F.if_nil(opts.path, opts.cwd), -- current path for file browser
     add_dirs = vim.F.if_nil(opts.add_dirs, true),
     hidden = hidden,
-    depth = vim.F.if_nil(opts.depth, 1), -- depth for file browser
+    depth = vim.F.if_nil(opts.depth), -- depth for file browser
+    max_results = opts.max_results,
     auto_depth = vim.F.if_nil(opts.auto_depth, false), -- depth for file browser
     respect_gitignore = vim.F.if_nil(opts.respect_gitignore, has_fd),
     follow_symlinks = vim.F.if_nil(opts.follow_symlinks, false),
