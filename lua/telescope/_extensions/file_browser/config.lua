@@ -1,4 +1,5 @@
 local fb_actions = require "telescope._extensions.file_browser.actions"
+local fb_utils = require "telescope._extensions.file_browser.utils"
 local Path = require "plenary.path"
 
 local action_state = require "telescope.actions.state"
@@ -44,10 +45,10 @@ _TelescopeFileBrowserConfig = {
       ["s"] = fb_actions.toggle_all,
     },
   },
-  attach_mappings = function()
+  attach_mappings = function(_, _)
     local entry_is_dir = function()
       local entry = action_state.get_selected_entry()
-      return entry and entry.Path:is_dir()
+      return entry and fb_utils.is_dir(entry.Path)
     end
 
     local entry_is_nil = function(prompt_bufnr)
@@ -120,6 +121,15 @@ config.setup = function(opts)
   -- TODO maybe merge other keys as well from telescope.config
   config.values.mappings =
     vim.tbl_deep_extend("force", config.values.mappings, require("telescope.config").values.mappings)
+
+  if opts.attach_mappings then
+    local opts_attach = opts.attach_mappings
+    local default_attach = config.values.attach_mappings
+    opts.attach_mappings = function(prompt_bufnr, map)
+      default_attach(prompt_bufnr, map)
+      return opts_attach(prompt_bufnr, map)
+    end
+  end
   config.values = vim.tbl_deep_extend("force", config.values, opts)
 
   if config.values.hijack_netrw then

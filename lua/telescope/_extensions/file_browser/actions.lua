@@ -85,7 +85,7 @@ local create = function(file, finder)
   if not fb_utils.is_dir(file.filename) then
     file:touch { parents = true }
   else
-    Path:new(file.filename:sub(1, -2)):mkdir { parents = true }
+    Path:new(file.filename:sub(1, -2)):mkdir { parents = true, mode = 493 } -- 493 => decimal for mode 0755
   end
   return file
 end
@@ -93,7 +93,7 @@ end
 local function newly_created_root(path, cwd)
   local idx
   local parents = path:parents()
-  cwd = fb_utils.trim_right_os_sep(cwd)
+  cwd = fb_utils.sanitize_path_str(cwd)
   for i, p in ipairs(parents) do
     if p == cwd then
       idx = i
@@ -270,7 +270,7 @@ fb_actions.rename = function(prompt_bufnr)
       fb_utils.notify("action.rename", { msg = "No selection to be renamed!", level = "WARN" })
       return
     end
-    local old_path = Path:new(entry[1])
+    local old_path = entry.Path
     -- "../" aka parent_dir more common so test first
     if old_path.filename == parent_dir.filename then
       fb_utils.notify("action.rename", { msg = "Please select a valid file or folder!", level = "WARN", quiet = quiet })
@@ -325,7 +325,11 @@ fb_actions.rename = function(prompt_bufnr)
 end
 
 --- Move multi-selected files or folders to current directory in |telescope-file-browser.picker.file_browser|.<br>
---- Note: Performs a blocking synchronized file-system operation.
+--- - Notes:
+---   - Performs a blocking synchronized file-system operation.
+---   - Moving multi-selections is sensitive to order of selection,
+---     which potentially unpacks files from parent(s) dirs
+---     if files are selected first.
 ---@param prompt_bufnr number: The prompt bufnr
 fb_actions.move = function(prompt_bufnr)
   local current_picker = action_state.get_current_picker(prompt_bufnr)
@@ -342,17 +346,22 @@ fb_actions.move = function(prompt_bufnr)
   local skipped = {}
 
   for idx, selection in ipairs(selections) do
-    local filename = selection.filename:sub(#selection:parent().filename + 2)
-    local new_path = Path:new { target_dir, filename }
-    if new_path:exists() then
-      table.insert(skipped, filename)
+    local src_path_abs = selection:absolute()
+    local basename = vim.fs.basename(src_path_abs)
+    local dest_path = Path:new { target_dir, basename }
+    if dest_path:exists() then
+      table.insert(skipped, basename)
     else
-      selection:rename {
-        new_name = new_path.filename,
-      }
-      table.insert(moved, filename)
+      local dest_path_abs = dest_path:absolute()
+      selection:rename { new_name = dest_path_abs }
+      if not selection:is_dir() then
+        fb_utils.rename_buf(src_path_abs, dest_path_abs)
+      else
+        fb_utils.rename_dir_buf(src_path_abs, dest_path_abs)
+      end
+      table.insert(moved, basename)
       if idx == 1 and #selections == 1 then
-        fb_utils.selection_callback(current_picker, new_path:absolute())
+        fb_utils.selection_callback(current_picker, dest_path_abs)
       end
     end
   end
@@ -811,43 +820,58 @@ fb_actions.path_separator = function(prompt_bufnr)
   local current_picker = action_state.get_current_picker(prompt_bufnr)
   local dir = Path:new(current_picker.finder.path .. os_sep .. current_picker:_get_prompt() .. os_sep)
 
-  if dir:exists() and dir:is_dir() then
-    fb_actions.open_dir(prompt_bufnr, dir.filename)
+  if current_picker.finder.files and dir:exists() and dir:is_dir() then
+    fb_actions.open_dir(prompt_bufnr, nil, dir.filename)
   else
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(os_sep, true, false, true), "tn", false)
   end
 end
 
-fb_actions.open_dir = function(prompt_bufnr, dir)
-  local current_picker = action_state.get_current_picker(prompt_bufnr)
-  local finder = current_picker.finder
-  local entry = action_state.get_selected_entry()
+---get directory path to open based on `collapse_dirs` options
+---@param finder any
+---@param path string
+---@param upward boolean whether to "cd" upwards
+---@return string? #path string
+local function open_dir_path(finder, path, upward)
+  path = vim.loop.fs_realpath(path) or ""
+  if path == "" then
+    return
+  end
 
-  if not vim.loop.fs_access(entry.path, "X") then
+  if not vim.loop.fs_access(path, "X") then
     fb_utils.notify("select", { level = "WARN", msg = "Permission denied" })
     return
   end
 
-  local path = vim.loop.fs_realpath(dir:match("^" .. os_sep) and dir or entry.path)
-
-  if finder.files and finder.collapse_dirs then
-    local upwards = path == Path:new(finder.path):parent():absolute()
-    while true do
-      local dirs = scan.scan_dir(path, { add_dirs = true, depth = 1, hidden = true })
-      if #dirs == 1 and vim.fn.isdirectory(dirs[1]) then
-        path = upwards and Path:new(path):parent():absolute() or dirs[1]
-        -- make sure it's upper bound (#dirs == 1 implicitly reflects lower bound)
-        if path == Path:new(path):parent():absolute() then
-          break
-        end
-      else
-        break
-      end
-    end
+  if not finder.files or not finder.collapse_dirs then
+    return path
   end
 
+  while true do
+    local dirs = scan.scan_dir(path, { add_dirs = true, depth = 1, hidden = true })
+    if #dirs == 1 and vim.fn.isdirectory(dirs[1]) == 1 then
+      path = upward and Path:new(path):parent():absolute() or dirs[1]
+    else
+      break
+    end
+  end
+  return path
+end
+
+---comment open directory and refresh picker
+---@param prompt_bufnr integer
+---@param _ any select type
+---@param dir string? priority dir path
+fb_actions.open_dir = function(prompt_bufnr, _, dir)
+  local current_picker = action_state.get_current_picker(prompt_bufnr)
+  local finder = current_picker.finder
+  local entry = action_state.get_selected_entry()
+
+  local path = dir or entry.path
+  local upward = path == Path:new(finder.path):parent():absolute()
+
   finder.files = true
-  finder.path = path
+  finder.path = open_dir_path(finder, path, upward)
   fb_utils.redraw_border_title(current_picker)
   current_picker:refresh(
     finder,
